@@ -1,11 +1,12 @@
 # pymsstats
 
-A **pure-Python port of [Bioconductor MSstats](https://bioconductor.org/packages/release/bioc/html/MSstats.html)** (Choi *et al.*, *Bioinformatics* 2014) — pre-processing, per-run median normalization, Tukey median polish (TMP) summarization, and per-protein LMM-based group comparison for mass-spec proteomics.
+A **pure-Python port of [Bioconductor MSstats](https://bioconductor.org/packages/release/bioc/html/MSstats.html)** (Choi *et al.*, *Bioinformatics* 2014) — vendor converters, pre-processing, normalization, peptide-to-protein summarization, per-protein LMM-based group comparison, sample-size design, and QC plotting for mass-spec proteomics.
 
-- Three-step pipeline mirroring R: `dataProcess (log2 + equalizeMedians + TMP) → groupComparison`
-- **No `rpy2`**, no R install — `equalizeMedians`, Tukey medpolish, and the per-protein OLS / mixed-LMM tests reimplemented directly in NumPy / SciPy / statsmodels
-- Bit-for-bit reproduction of TMP `LogIntensities` (max abs diff = 5e-14) and `log2FC` (max abs diff = 8e-15) against R MSstats 4.14.2 on the canonical LFQ design
+- Full pipeline mirroring R: `vendor → dataProcess (log2 + normalize + TMP/linear) → groupComparison → designSampleSize / plots`
+- **No `rpy2`**, no R install — every algorithm reimplemented directly in NumPy / SciPy / statsmodels / pandas
+- Bit-for-bit reproduction of TMP `LogIntensities` (5e-14), `log2FC` (8e-15), linear summarization (9e-14), `designSampleSize` `numSample` (exact), and `MSstatsContrastMatrix` against R MSstats 4.14.2
 - **2.5×–3.9× faster** than R MSstats on the 500-protein × 8-run benchmark (Pearson r = 1.0 on every output)
+- Five vendor converters (DIA-NN, Spectronaut, FragPipe, OpenMS, Skyline) on top of MaxQuant
 - AnnData / pandas-friendly: accepts MSstats-format long DataFrame (10 canonical columns)
 
 > This is a **standalone mirror** of the canonical implementation that lives in [`omicverse`](https://github.com/Starlitnightly/omicverse). All algorithmic work is developed upstream in omicverse and synced here.
@@ -48,17 +49,45 @@ result = group_comparison(
 # result columns: Protein, Label, log2FC, SE, df, t, pvalue, adj.pvalue, issue
 ```
 
-A minimal MaxQuant → MSstats converter is also exposed (most-common label-free
-DDA case only; full converter deferred to v0.2):
+### Vendor converters
+
+Six converters turn raw vendor output into MSstats long-format:
 
 ```python
-from pymsstats import maxquant_to_msstats
+from pymsstats import (
+    maxquant_to_msstats, diann_to_msstats, spectronaut_to_msstats,
+    fragpipe_to_msstats, openms_to_msstats, skyline_to_msstats,
+)
 
-pg  = pd.read_csv("proteinGroups.txt", sep="\t")
-ev  = pd.read_csv("evidence.txt", sep="\t")
 ann = pd.read_csv("annotation.csv")   # columns: Run, Condition, BioReplicate
 
+# MaxQuant
+pg = pd.read_csv("proteinGroups.txt", sep="\t")
+ev = pd.read_csv("evidence.txt", sep="\t")
 msstats_df = maxquant_to_msstats(pg, ev, ann)
+
+# DIA-NN
+report = pd.read_csv("report.tsv", sep="\t")
+msstats_df = diann_to_msstats(report, ann, qvalue_cutoff=0.01)
+
+# Spectronaut / FragPipe / OpenMS / Skyline
+msstats_df = spectronaut_to_msstats(pd.read_csv("spectronaut.tsv", sep="\t"))
+msstats_df = skyline_to_msstats(pd.read_csv("skyline.csv"), ann)
+```
+
+### Sample-size design, quantification, plotting
+
+```python
+from pymsstats import design_sample_size, quantification, group_comparison_plots
+
+# how many replicates for 80% power at FC 1.25–1.5?
+design = design_sample_size(processed, desired_fc=(1.25, 1.5), power=0.8)
+
+# per-protein abundance matrix
+quant = quantification(processed, type="Sample")
+
+# volcano / heatmap on the comparison result
+ax = group_comparison_plots(result, type="VolcanoPlot")
 ```
 
 ## Low-level API
@@ -128,23 +157,46 @@ pytest tests/test_r_parity.py -v
 pytest tests/ -v
 ```
 
-## What's NOT included (deferred to v0.2)
+## Ported MSstats functions (v0.2)
+
+| R function | Python | Status |
+|---|---|---|
+| `dataProcess` (log2 + equalizeMedians + TMP) | `data_process` | OK |
+| `groupComparison` (OLS / LMM auto-dispatch + BH) | `group_comparison` | OK |
+| `MaxQtoMSstatsFormat` | `maxquant_to_msstats` | OK |
+| `DIANNtoMSstatsFormat` | `diann_to_msstats` | OK |
+| `SpectronauttoMSstatsFormat` | `spectronaut_to_msstats` | OK |
+| `FragPipetoMSstatsFormat` | `fragpipe_to_msstats` | OK |
+| `OpenMStoMSstatsFormat` | `openms_to_msstats` | OK |
+| `SkylinetoMSstatsFormat` | `skyline_to_msstats` | OK |
+| `validateAnnotation` | `validate_annotation` | OK |
+| `MSstatsMergeFractions` | `merge_fractions` | OK |
+| `MSstatsContrastMatrix` | `msstats_contrast_matrix` | OK (R-exact) |
+| `designSampleSize` | `design_sample_size` | OK (R-exact `numSample`) |
+| `MSstatsNormalize` (equalizeMedians/quantile/globalStandards) | `msstats_normalize` | OK |
+| `MSstatsSummarize` (TMP / linear) | `msstats_summarize` | OK (R-exact) |
+| `MSstatsSelectFeatures` (all / topN) | `select_features` | OK |
+| `MSstatsHandleMissing` | `msstats_handle_missing` | OK |
+| `quantification` | `quantification` | OK |
+| `getProcessed` / `getSamplesInfo` / `getSelectedProteins` | `get_processed` / `get_samples_info` / `get_selected_proteins` | OK |
+| `dataProcessPlots` (Profile/QC/Condition) | `data_process_plots` | OK |
+| `groupComparisonPlots` (Volcano/Heatmap/Comparison) | `group_comparison_plots` | OK |
+| `groupComparisonQCPlots` | `group_comparison_qc_plots` | OK |
+| `modelBasedQCPlots` | `model_based_qc_plots` | OK |
+| `theme_msstats` | `theme_msstats` | OK |
+
+### Not ported (Tier 4 — low priority)
 
 | R feature | Status |
 |---|---|
-| `dataProcess` log2 + `equalizeMedians` + TMP summary | OK (v0.1) |
-| `groupComparison` 2-group contrasts (OLS / LMM auto-dispatch) | OK (v0.1) |
-| BH-corrected adjusted p-values per contrast | OK (v0.1) |
-| Stripped-down `MaxQtoMSstatsFormat` (`proteinGroups` + `evidence`) | OK (v0.1) |
-| Other input converters (DIA-NN, FragPipe, Spectronaut, OpenMS, Skyline, OpenSWATH) | deferred (v0.2) |
-| TMT / labeled (heavy-light) workflows | deferred (v0.2) |
-| `linear` (vs TMP) summarization method | deferred (v0.2) |
-| Imputation (`MBimpute`, censored-value handling) | deferred (v0.2) |
-| Quantile normalization, global standards | deferred (v0.2) |
-| `dataProcessPlots`, `groupComparisonPlots`, QC plots | deferred (v0.2) |
-| `designSampleSizeClassification` power calculations | deferred (v0.2) |
-| Multi-contrast / interaction designs | deferred (v0.2) |
-| Fractionation handling | deferred (v0.2) |
+| `extractSDRF` / `SDRFtoAnnotation` / `example_SDRF` | not ported (SDRF metadata helpers) |
+| `checkRepeatedDesign` / `makePeptidesDictionary` | not ported (internal design/utility helpers) |
+| `MSstatsGroupComparison*` / `MSstatsPrepareFor*` / `MSstatsSummarizeSingle*` / `MSstatsSummarizeWithSingleCore` | not ported — internal R worker functions; the high-level `group_comparison` / `msstats_summarize` already cover their behaviour |
+| `PDtoMSstatsFormat` / `ProgenesistoMSstatsFormat` / `OpenSWATHtoMSstatsFormat` / `DIAUmpiretoMSstatsFormat` | not ported (less-common vendor converters) |
+| TMT / labeled (heavy-light) workflows | not ported |
+| `feature_subset='highQuality'` (in `select_features`) | falls back to `'all'` with a warning |
+| `globalStandards` quantile-per-fraction edge cases | single-fraction only |
+| `designSampleSizePlots` | not ported |
 
 ## Relationship to omicverse
 

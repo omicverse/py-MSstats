@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymsstats"
-version = "0.1.0"
-description = "Pure-Python port of Bioconductor MSstats — pre-processing, normalization, TMP summarization, and LMM-based group comparison for mass-spec proteomics."
+version = "0.2.0"
+description = "Pure-Python port of Bioconductor MSstats — vendor converters, pre-processing, normalization, summarization, group comparison, sample-size design, and QC plotting for mass-spec proteomics."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
