@@ -1,10 +1,20 @@
 name: Publish to PyPI
 
-# Manually triggered release workflow. Builds the sdist + wheel on a
-# GitHub-hosted runner and uploads to PyPI with twine. Running the
-# upload from a GitHub runner avoids local-network rate limits.
+# Builds the sdist + wheel on a GitHub-hosted runner and uploads to
+# PyPI with twine. Running the upload from a GitHub runner avoids
+# local-network rate limits.
+#
+# Triggers:
+#   * workflow_dispatch — manual one-click release.
+#   * schedule — every 6 h. This auto-retries the upload: PyPI applies a
+#     day-scale rate limit on *new project* creation, so the very first
+#     publish of this package may 429 for a while. ``--skip-existing``
+#     makes every run after the first publish a harmless no-op, so the
+#     schedule can be safely deleted once the project is live on PyPI.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
 
 jobs:
   publish:
