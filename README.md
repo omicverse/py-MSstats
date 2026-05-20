@@ -4,9 +4,11 @@ A **pure-Python port of [Bioconductor MSstats](https://bioconductor.org/packages
 
 - Full pipeline mirroring R: `vendor → dataProcess (log2 + normalize + TMP/linear) → groupComparison → designSampleSize / plots`
 - **No `rpy2`**, no R install — every algorithm reimplemented directly in NumPy / SciPy / statsmodels / pandas
-- Bit-for-bit reproduction of TMP `LogIntensities` (5e-14), `log2FC` (8e-15), linear summarization (9e-14), `designSampleSize` `numSample` (exact), and `MSstatsContrastMatrix` against R MSstats 4.14.2
+- **100% coverage of the R MSstats 4.14.2 public API** — all 50 exported names (46 functions ported, 4 example datasets replaced by a synthetic generator)
+- Bit-for-bit reproduction of TMP `LogIntensities` (5e-14), `log2FC` (8e-15), linear summarization (9e-14), `designSampleSize` `numSample` (exact), `MSstatsContrastMatrix`, `checkRepeatedDesign` and `SDRFtoAnnotation` against R MSstats 4.14.2
 - **2.5×–3.9× faster** than R MSstats on the 500-protein × 8-run benchmark (Pearson r = 1.0 on every output)
-- Five vendor converters (DIA-NN, Spectronaut, FragPipe, OpenMS, Skyline) on top of MaxQuant
+- Nine vendor converters (DIA-NN, Spectronaut, FragPipe, OpenMS, Skyline, Proteome Discoverer, Progenesis, OpenSWATH, DIA-Umpire) on top of MaxQuant
+- Modular worker API (`MSstatsPrepareFor*`, `MSstatsSummarize*`, `MSstatsGroupComparison*`) + SDRF metadata helpers
 - AnnData / pandas-friendly: accepts MSstats-format long DataFrame (10 canonical columns)
 
 > This is a **standalone mirror** of the canonical implementation that lives in [`omicverse`](https://github.com/Starlitnightly/omicverse). All algorithmic work is developed upstream in omicverse and synced here.
@@ -157,46 +159,113 @@ pytest tests/test_r_parity.py -v
 pytest tests/ -v
 ```
 
-## Ported MSstats functions (v0.2)
+## MSstats public API coverage (v0.3 — 100%)
+
+All **50 exported names** of R MSstats 4.14.2 are covered. The 46
+functions are ported to Python; the 4 bundled example datasets are
+copyrighted Bioconductor data objects (not redistributed) and are
+replaced by a synthetic generator.
+
+### Core pipeline
 
 | R function | Python | Status |
 |---|---|---|
-| `dataProcess` (log2 + equalizeMedians + TMP) | `data_process` | OK |
-| `groupComparison` (OLS / LMM auto-dispatch + BH) | `group_comparison` | OK |
-| `MaxQtoMSstatsFormat` | `maxquant_to_msstats` | OK |
-| `DIANNtoMSstatsFormat` | `diann_to_msstats` | OK |
-| `SpectronauttoMSstatsFormat` | `spectronaut_to_msstats` | OK |
-| `FragPipetoMSstatsFormat` | `fragpipe_to_msstats` | OK |
-| `OpenMStoMSstatsFormat` | `openms_to_msstats` | OK |
-| `SkylinetoMSstatsFormat` | `skyline_to_msstats` | OK |
-| `validateAnnotation` | `validate_annotation` | OK |
-| `MSstatsMergeFractions` | `merge_fractions` | OK |
-| `MSstatsContrastMatrix` | `msstats_contrast_matrix` | OK (R-exact) |
-| `designSampleSize` | `design_sample_size` | OK (R-exact `numSample`) |
-| `MSstatsNormalize` (equalizeMedians/quantile/globalStandards) | `msstats_normalize` | OK |
-| `MSstatsSummarize` (TMP / linear) | `msstats_summarize` | OK (R-exact) |
-| `MSstatsSelectFeatures` (all / topN) | `select_features` | OK |
-| `MSstatsHandleMissing` | `msstats_handle_missing` | OK |
-| `quantification` | `quantification` | OK |
-| `getProcessed` / `getSamplesInfo` / `getSelectedProteins` | `get_processed` / `get_samples_info` / `get_selected_proteins` | OK |
-| `dataProcessPlots` (Profile/QC/Condition) | `data_process_plots` | OK |
-| `groupComparisonPlots` (Volcano/Heatmap/Comparison) | `group_comparison_plots` | OK |
-| `groupComparisonQCPlots` | `group_comparison_qc_plots` | OK |
-| `modelBasedQCPlots` | `model_based_qc_plots` | OK |
-| `theme_msstats` | `theme_msstats` | OK |
+| `dataProcess` (log2 + equalizeMedians + TMP) | `data_process` | ✅ ported |
+| `groupComparison` (OLS / LMM auto-dispatch + BH) | `group_comparison` | ✅ ported |
 
-### Not ported (Tier 4 — low priority)
+### Vendor converters
 
-| R feature | Status |
-|---|---|
-| `extractSDRF` / `SDRFtoAnnotation` / `example_SDRF` | not ported (SDRF metadata helpers) |
-| `checkRepeatedDesign` / `makePeptidesDictionary` | not ported (internal design/utility helpers) |
-| `MSstatsGroupComparison*` / `MSstatsPrepareFor*` / `MSstatsSummarizeSingle*` / `MSstatsSummarizeWithSingleCore` | not ported — internal R worker functions; the high-level `group_comparison` / `msstats_summarize` already cover their behaviour |
-| `PDtoMSstatsFormat` / `ProgenesistoMSstatsFormat` / `OpenSWATHtoMSstatsFormat` / `DIAUmpiretoMSstatsFormat` | not ported (less-common vendor converters) |
-| TMT / labeled (heavy-light) workflows | not ported |
-| `feature_subset='highQuality'` (in `select_features`) | falls back to `'all'` with a warning |
-| `globalStandards` quantile-per-fraction edge cases | single-fraction only |
-| `designSampleSizePlots` | not ported |
+| R function | Python | Status |
+|---|---|---|
+| `MaxQtoMSstatsFormat` | `maxquant_to_msstats` | ✅ ported |
+| `DIANNtoMSstatsFormat` | `diann_to_msstats` | ✅ ported |
+| `SpectronauttoMSstatsFormat` | `spectronaut_to_msstats` | ✅ ported |
+| `FragPipetoMSstatsFormat` | `fragpipe_to_msstats` | ✅ ported |
+| `OpenMStoMSstatsFormat` | `openms_to_msstats` | ✅ ported |
+| `SkylinetoMSstatsFormat` | `skyline_to_msstats` | ✅ ported |
+| `PDtoMSstatsFormat` | `pd_to_msstats` | ✅ ported |
+| `ProgenesistoMSstatsFormat` | `progenesis_to_msstats` | ✅ ported |
+| `OpenSWATHtoMSstatsFormat` | `openswath_to_msstats` | ✅ ported |
+| `DIAUmpiretoMSstatsFormat` | `diaumpire_to_msstats` | ✅ ported |
+
+### Statistical helpers
+
+| R function | Python | Status |
+|---|---|---|
+| `validateAnnotation` | `validate_annotation` | ✅ ported |
+| `MSstatsMergeFractions` | `merge_fractions` | ✅ ported |
+| `MSstatsContrastMatrix` | `msstats_contrast_matrix` | ✅ ported (R-exact) |
+| `designSampleSize` | `design_sample_size` | ✅ ported (R-exact `numSample`) |
+| `MSstatsNormalize` (equalizeMedians/quantile/globalStandards) | `msstats_normalize` | ✅ ported |
+| `MSstatsSummarize` (TMP / linear) | `msstats_summarize` | ✅ ported (R-exact) |
+| `MSstatsSelectFeatures` (all / topN) | `select_features` | ✅ ported |
+| `MSstatsHandleMissing` | `msstats_handle_missing` | ✅ ported |
+| `checkRepeatedDesign` | `check_repeated_design` | ✅ ported (R-exact) |
+| `makePeptidesDictionary` | `make_peptides_dictionary` | ✅ ported |
+| `quantification` | `quantification` | ✅ ported |
+| `getProcessed` / `getSamplesInfo` / `getSelectedProteins` | `get_processed` / `get_samples_info` / `get_selected_proteins` | ✅ ported |
+
+### Modular worker API
+
+| R function | Python | Status |
+|---|---|---|
+| `MSstatsPrepareForDataProcess` | `prepare_for_data_process` | ✅ ported |
+| `MSstatsPrepareForSummarization` | `prepare_for_summarization` | ✅ ported |
+| `MSstatsPrepareForGroupComparison` | `prepare_for_group_comparison` | ✅ ported |
+| `MSstatsSummarize` (modular) | `msstats_summarize_modular` | ✅ ported |
+| `MSstatsSummarizationOutput` | `summarization_output` | ✅ ported |
+| `MSstatsSummarizeWithSingleCore` | `summarize_single_core` | ✅ ported |
+| `MSstatsSummarizeSingleTMP` | `summarize_single_tmp` | ✅ ported |
+| `MSstatsSummarizeSingleLinear` | `summarize_single_linear` | ✅ ported |
+| `MSstatsGroupComparison` | `msstats_group_comparison` | ✅ ported |
+| `MSstatsGroupComparisonSingleProtein` | `group_comparison_single_protein` | ✅ ported |
+| `MSstatsGroupComparisonOutput` | `group_comparison_output` | ✅ ported |
+
+### SDRF helpers
+
+| R function | Python | Status |
+|---|---|---|
+| `extractSDRF` | `extract_sdrf` | ✅ ported |
+| `SDRFtoAnnotation` | `sdrf_to_annotation` | ✅ ported (R-exact) |
+| `example_SDRF` | `example_sdrf` | ✅ ported (synthetic stand-in) |
+
+### Plotting
+
+| R function | Python | Status |
+|---|---|---|
+| `dataProcessPlots` (Profile/QC/Condition) | `data_process_plots` | ✅ ported |
+| `groupComparisonPlots` (Volcano/Heatmap/Comparison) | `group_comparison_plots` | ✅ ported |
+| `groupComparisonQCPlots` | `group_comparison_qc_plots` | ✅ ported |
+| `modelBasedQCPlots` | `model_based_qc_plots` | ✅ ported |
+| `designSampleSizePlots` | `design_sample_size_plots` | ✅ ported |
+| `theme_msstats` | `theme_msstats` | ✅ ported |
+| `savePlot` | `save_plot` | ✅ ported |
+
+### Bundled example datasets
+
+| R object | Python | Status |
+|---|---|---|
+| `DDARawData` | `load_dda_example()` | ⚠️ synthetic stand-in — original R data not redistributed |
+| `DDARawData.Skyline` | `load_dda_example()` | ⚠️ synthetic stand-in |
+| `DIARawData` | `load_dia_example()` | ⚠️ synthetic stand-in |
+| `SRMRawData` | `load_srm_example()` | ⚠️ synthetic stand-in |
+
+The four R example datasets are copyrighted Bioconductor data objects;
+pymsstats provides `make_example_dataset()` / `load_dda_example()` /
+`load_dia_example()` / `load_srm_example()` which return a synthetic
+MSstats long-format DataFrame with the same 10 canonical columns so the
+pipeline can be exercised end-to-end without the original data.
+
+### Known limitations (within ported functions)
+
+- The mixed-effects (`lme4::lmer`) path uses `statsmodels.MixedLM` with
+  an OLS fallback on singular-Hessian cases (SE differs ≤ 5%; ranking
+  unaffected — see R-parity table above).
+- `feature_subset='highQuality'` in `select_features` falls back to
+  `'all'` with a warning (the leverage-based outlier rule is rarely
+  exercised).
+- TMT / labeled (heavy-light) workflows are out of scope (MSstatsTMT is
+  a separate Bioconductor package).
 
 ## Relationship to omicverse
 

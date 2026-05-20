@@ -329,10 +329,50 @@ def model_based_qc_plots(
     return ax
 
 
+def save_plot(fig, path: str, *, width: float = 10.0, height: float = 10.0,
+              dpi: int = 300, **kwargs):
+    """Save a matplotlib figure to disk.
+
+    Port of ``MSstats::savePlot`` — a thin wrapper around the R ``pdf()``
+    device. R only supports a PDF device; this Python port supports any
+    extension matplotlib can write (``.pdf``, ``.png``, ``.svg`` …),
+    inferred from ``path``.
+
+    Parameters
+    ----------
+    fig
+        A matplotlib ``Figure`` (or an ``Axes`` — its parent figure is
+        used).
+    path
+        Output file path; the extension determines the format.
+    width, height
+        Figure size in inches (applied before saving). R defaults to a
+        square page.
+    dpi
+        Resolution for raster formats (PNG).
+    **kwargs
+        Forwarded to ``Figure.savefig``.
+
+    Returns
+    -------
+    str
+        The path written.
+    """
+    _get_mpl()
+    # accept an Axes
+    if hasattr(fig, "figure") and not hasattr(fig, "savefig"):
+        fig = fig.figure
+    if width is not None and height is not None:
+        fig.set_size_inches(float(width), float(height))
+    fig.savefig(path, dpi=dpi, bbox_inches="tight", **kwargs)
+    return path
+
+
 __all__ = [
     "theme_msstats",
     "data_process_plots",
     "group_comparison_plots",
     "group_comparison_qc_plots",
     "model_based_qc_plots",
+    "save_plot",
 ]

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymsstats"
-version = "0.2.0"
+version = "0.3.0"
 description = "Pure-Python port of Bioconductor MSstats — vendor converters, pre-processing, normalization, summarization, group comparison, sample-size design, and QC plotting for mass-spec proteomics."
 readme = "README.md"
 requires-python = ">=3.9"

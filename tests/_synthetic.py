@@ -144,3 +144,102 @@ def mock_msstats_long(seed: int = 3, n_proteins: int = 6) -> pd.DataFrame:
                     "Intensity":        float(rng.lognormal(14, 0.5)),
                 })
     return pd.DataFrame(rows)
+
+
+def mock_pd_report(seed: int = 4, n_proteins: int = 6) -> pd.DataFrame:
+    """Mock Proteome Discoverer PSM export."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for p in range(n_proteins):
+        for pep in range(3):
+            for run in range(4):
+                rows.append({
+                    "Protein Group Accessions": f"P{p:03d}",
+                    "Sequence":                 f"PEP{p:03d}{pep}",
+                    "Modifications":            "" if pep else "Carbamidomethyl",
+                    "Charge":                   2,
+                    "# Proteins":               1,
+                    "SpectrumFile":             f"run{run}",
+                    "Precursor Area":           float(rng.lognormal(15, 0.5)),
+                })
+    return pd.DataFrame(rows)
+
+
+def mock_progenesis_report(seed: int = 5, n_proteins: int = 6) -> pd.DataFrame:
+    """Mock (already-melted long) Progenesis QI export."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for p in range(n_proteins):
+        for pep in range(3):
+            for run in range(4):
+                rows.append({
+                    "Accession":         f"P{p:03d}",
+                    "Sequence":          f"PEP{p:03d}{pep}",
+                    "Modifications":     "",
+                    "Charge":            2,
+                    "Use in quantitation": "True",
+                    "Run":               f"run{run}",
+                    "Intensity":         float(rng.lognormal(13, 0.5)),
+                })
+    return pd.DataFrame(rows)
+
+
+def mock_openswath_report(seed: int = 6, n_proteins: int = 6) -> pd.DataFrame:
+    """Mock OpenSWATH export (semicolon-joined fragment lists)."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for p in range(n_proteins):
+        for pep in range(3):
+            for run in range(4):
+                frags = ";".join(f"y{f}" for f in (3, 4, 5))
+                ints = ";".join(
+                    str(float(rng.lognormal(12, 0.5))) for _ in range(3)
+                )
+                rows.append({
+                    "ProteinName":              f"P{p:03d}",
+                    "FullPeptideName":          f"PEP{p:03d}{pep}",
+                    "Charge":                   2,
+                    "filename":                 f"run{run}",
+                    "aggr_Fragment_Annotation": frags,
+                    "aggr_Peak_Area":           ints,
+                    "m_score":                  0.001,
+                    "decoy":                    0,
+                })
+    return pd.DataFrame(rows)
+
+
+def mock_diaumpire_report(seed: int = 7, n_proteins: int = 6) -> pd.DataFrame:
+    """Mock DIA-Umpire fragment-level export."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for p in range(n_proteins):
+        for pep in range(3):
+            for frag in range(2):
+                for run in range(4):
+                    rows.append({
+                        "ProteinName":       f"P{p:03d}",
+                        "PeptideSequence":   f"PEP{p:03d}{pep}",
+                        "FragmentIon":       f"y{frag + 3}",
+                        "Selected_fragment": "True",
+                        "Selected_peptide":  "True",
+                        "Run":               f"run{run}",
+                        "Intensity":         float(rng.lognormal(14, 0.5)),
+                    })
+    return pd.DataFrame(rows)
+
+
+def mock_sdrf(n_samples: int = 6, n_runs: int = 2) -> pd.DataFrame:
+    """Mock SDRF table with bracketed headers."""
+    rows = []
+    for run in range(1, n_runs + 1):
+        for s in range(1, n_samples + 1):
+            rows.append({
+                "source name": f"Sample {s}",
+                "characteristics[organism]": "Homo sapiens",
+                "characteristics[disease]": (
+                    "disease" if s % 2 == 0 else "control"),
+                "characteristics[biological replicate]": s,
+                "comment[fraction identifier]": 1,
+                "comment[data file]": f"sample{s}_run{run}.raw",
+            })
+    return pd.DataFrame(rows)

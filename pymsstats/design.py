@@ -249,4 +249,57 @@ def design_sample_size(
     )
 
 
-__all__ = ["design_sample_size"]
+def design_sample_size_plots(result: pd.DataFrame, ax=None):
+    """Plot the sample-size / power curve from :func:`design_sample_size`.
+
+    Port of ``MSstats::designSampleSizePlots``. The R function plots
+    ``numSample`` vs ``desiredFC`` (when the result varies sample size)
+    or ``power`` vs ``desiredFC`` (when it varies power).
+
+    Parameters
+    ----------
+    result
+        Output of :func:`design_sample_size` — a table with at least
+        ``desiredFC`` plus one of ``numSample`` / ``power`` varying.
+    ax
+        Optional matplotlib Axes; created if None.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+    """
+    import matplotlib.pyplot as plt  # lazy import
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(6, 4))
+
+    if result["numSample"].nunique() > 1:
+        index = "numSample"
+    elif result["power"].nunique() > 1:
+        index = "power"
+    else:
+        index = "numSample"
+
+    x = result["desiredFC"].to_numpy(dtype=float)
+    if index == "numSample":
+        ax.plot(x, result["numSample"].to_numpy(dtype=float), lw=2, color="C0")
+        ax.set_xlabel("Desired fold change")
+        ax.set_ylabel("Minimal number of biological replicates")
+        ax.set_title(
+            f"FDR is {', '.join(map(str, result['FDR'].unique()))}\n"
+            f"Statistical power is "
+            f"{', '.join(map(str, result['power'].unique()))}"
+        )
+    else:
+        ax.plot(x, result["power"].to_numpy(dtype=float), lw=2, color="C0")
+        ax.set_xlabel("Desired fold change")
+        ax.set_ylabel("Power")
+        ax.set_title(
+            f"Number of replicates is "
+            f"{', '.join(map(str, result['numSample'].unique()))}\n"
+            f"FDR is {', '.join(map(str, result['FDR'].unique()))}"
+        )
+    return ax
+
+
+__all__ = ["design_sample_size", "design_sample_size_plots"]

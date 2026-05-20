@@ -710,6 +710,344 @@ def skyline_to_msstats(
 
 
 # -----------------------------------------------------------------------------
+# Proteome Discoverer
+# -----------------------------------------------------------------------------
+def pd_to_msstats(
+    input: pd.DataFrame,
+    annotation: Optional[pd.DataFrame] = None,
+    *,
+    use_num_proteins_column: bool = False,
+    use_unique_peptide: bool = True,
+    summary_for_multiple_rows: str = "max",
+    remove_few_measurements: bool = True,
+    remove_oxidation_m_peptides: bool = False,
+    remove_protein_with_1_peptide: bool = False,
+    which_quantification: str = "Precursor.Area",
+    which_proteinid: str = "Protein.Group.Accessions",
+    which_sequence: str = "Sequence",
+) -> pd.DataFrame:
+    """Proteome Discoverer PSM export → MSstats long-format.
+
+    Port of ``PDtoMSstatsFormat``. Proteome Discoverer writes a PSM
+    table with a configurable protein-id / sequence / quantification
+    column. The MSstats cleaner (``MSstatsConvert:::.cleanRawPDMSstats``):
+
+    * selects ``which_proteinid, which_sequence, Modifications, Charge,
+      SpectrumFile, which_quantification`` (+ optional ``Fraction``);
+    * renames to ``ProteinName, PeptideSequence, Run, Intensity,
+      PrecursorCharge``;
+    * appends ``Modifications`` to the peptide sequence
+      (``PeptideSequence_Modifications``);
+    * when ``use_num_proteins_column`` and the ``X..Proteins`` (``#
+      Proteins``) column is present, keeps only rows where it equals 1
+      (unambiguous peptides).
+
+    The remaining steps mirror the shared pipeline: drop shared
+    peptides, aggregate multi-PSM rows by ``max``, drop low-measurement
+    features and (optionally) single-peptide proteins.
+    """
+    df = input.copy()
+    # PD column headers vary in punctuation ("Protein Group Accessions" vs
+    # "Protein.Group.Accessions"); normalize both sides to a key with no
+    # separators so the user's which_* arguments match (mirrors R's
+    # MSstatsConvert:::.standardizeColnames).
+    def _key(s):
+        return "".join(ch for ch in str(s) if ch.isalnum()).lower()
+
+    col_lookup = {_key(c): c for c in df.columns}
+
+    def _resolve(name, *fallbacks):
+        for cand in (name, *fallbacks):
+            real = col_lookup.get(_key(cand))
+            if real is not None:
+                return real
+        return None
+
+    prot_col = _resolve(which_proteinid)
+    seq_col = _resolve(which_sequence)
+    quant_col = _resolve(which_quantification)
+    charge_col = _resolve("Charge")
+    run_col = _resolve("SpectrumFile", "Spectrum File", "Run")
+    mods_col = _resolve("Modifications")
+    rename_map = {}
+    if prot_col is not None:
+        rename_map[prot_col] = "ProteinName"
+    if seq_col is not None:
+        rename_map[seq_col] = "PeptideSequence"
+    if quant_col is not None:
+        rename_map[quant_col] = "Intensity"
+    if charge_col is not None:
+        rename_map[charge_col] = "PrecursorCharge"
+    if run_col is not None:
+        rename_map[run_col] = "Run"
+    if mods_col is not None:
+        rename_map[mods_col] = "Modifications"
+    if use_num_proteins_column:
+        for cand in ("# Proteins", "#Proteins", "X..Proteins", "Number.of.Proteins"):
+            if cand in df.columns:
+                df = df.loc[
+                    pd.to_numeric(df[cand], errors="coerce") == 1
+                ]
+                break
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    if "Modifications" in df.columns and "PeptideSequence" in df.columns:
+        df["PeptideSequence"] = (
+            df["PeptideSequence"].astype(str) + "_"
+            + df["Modifications"].fillna("").astype(str)
+        )
+    if remove_oxidation_m_peptides and "PeptideSequence" in df.columns:
+        df = df.loc[~df["PeptideSequence"].astype(str).str.contains(
+            "Oxidation", case=False, regex=False)]
+    df["FragmentIon"] = "NA"
+    df["ProductCharge"] = "NA"
+    df["IsotopeLabelType"] = "L"
+    if "Intensity" in df.columns:
+        df["Intensity"] = pd.to_numeric(df["Intensity"], errors="coerce")
+        df.loc[df["Intensity"] == 0, "Intensity"] = np.nan
+    keep = [c for c in (
+        "ProteinName", "PeptideSequence", "PrecursorCharge",
+        "FragmentIon", "ProductCharge", "IsotopeLabelType",
+        "Condition", "BioReplicate", "Run", "Intensity",
+    ) if c in df.columns]
+    df = df[keep].copy()
+    if use_unique_peptide:
+        df = _drop_shared_peptides(df)
+    df = _aggregate_psms(df, summary_fn=summary_for_multiple_rows)
+    if remove_few_measurements:
+        df = _drop_few_measurements(df, min_obs=2)
+    if remove_protein_with_1_peptide:
+        df = _drop_single_feature_proteins(df)
+    return _finalize_msstats_long(df, annotation=annotation)
+
+
+# -----------------------------------------------------------------------------
+# Progenesis QI
+# -----------------------------------------------------------------------------
+def progenesis_to_msstats(
+    input: pd.DataFrame,
+    annotation: Optional[pd.DataFrame] = None,
+    *,
+    use_unique_peptide: bool = True,
+    summary_for_multiple_rows: str = "max",
+    remove_few_measurements: bool = True,
+    remove_oxidation_m_peptides: bool = False,
+    remove_protein_with_1_peptide: bool = False,
+) -> pd.DataFrame:
+    """Progenesis QI export → MSstats long-format.
+
+    Port of ``ProgenesistoMSstatsFormat``. Progenesis writes a *wide*
+    "feature measurements" table (one raw-abundance column per run); the
+    R cleaner melts that into long format. This Python port accepts the
+    already-melted long table with columns ``ProteinName`` (or
+    ``Protein`` / ``Accession``), ``Sequence`` (peptide), ``Charge`` (or
+    ``Ions``), ``Run``, ``Intensity`` plus optional ``Modifications`` and
+    ``Use.in.quantitation``. Rows with ``Use.in.quantitation == False``
+    are dropped (the Progenesis-specific filter).
+    """
+    df = input.copy()
+    for cand in ("Protein", "Accession"):
+        if cand in df.columns and "ProteinName" not in df.columns:
+            df = df.rename(columns={cand: "ProteinName"})
+            break
+    if "Ions" in df.columns and "Charge" not in df.columns:
+        df = df.rename(columns={"Ions": "Charge"})
+    df = df.rename(columns={
+        "Sequence": "PeptideSequence",
+        "Charge": "PrecursorCharge",
+    })
+    # Progenesis "Use in quantitation" filter
+    for cand in ("Use.in.quantitation", "Useinquantitation",
+                 "Use in quantitation"):
+        if cand in df.columns:
+            keep = df[cand].astype(str).str.lower().isin(
+                {"true", "1", "yes", ""})
+            df = df.loc[keep]
+            break
+    if "Modifications" in df.columns and "PeptideSequence" in df.columns:
+        df["PeptideSequence"] = (
+            df["PeptideSequence"].astype(str) + "_"
+            + df["Modifications"].fillna("").astype(str)
+        )
+    if remove_oxidation_m_peptides and "PeptideSequence" in df.columns:
+        df = df.loc[~df["PeptideSequence"].astype(str).str.contains(
+            "Oxidation", case=False, regex=False)]
+    # drop empty protein / peptide rows
+    if "ProteinName" in df.columns:
+        df = df.loc[df["ProteinName"].astype(str).str.strip() != ""]
+    if "PeptideSequence" in df.columns:
+        df = df.loc[df["PeptideSequence"].astype(str).str.strip() != ""]
+    df["FragmentIon"] = "NA"
+    df["ProductCharge"] = "NA"
+    df["IsotopeLabelType"] = "L"
+    if "Intensity" in df.columns:
+        df["Intensity"] = pd.to_numeric(df["Intensity"], errors="coerce")
+        df.loc[df["Intensity"] == 0, "Intensity"] = np.nan
+    keep = [c for c in (
+        "ProteinName", "PeptideSequence", "PrecursorCharge",
+        "FragmentIon", "ProductCharge", "IsotopeLabelType",
+        "Condition", "BioReplicate", "Run", "Intensity",
+    ) if c in df.columns]
+    df = df[keep].copy()
+    if use_unique_peptide:
+        df = _drop_shared_peptides(df)
+    df = _aggregate_psms(df, summary_fn=summary_for_multiple_rows)
+    if remove_few_measurements:
+        df = _drop_few_measurements(df, min_obs=2)
+    if remove_protein_with_1_peptide:
+        df = _drop_single_feature_proteins(df)
+    return _finalize_msstats_long(df, annotation=annotation)
+
+
+# -----------------------------------------------------------------------------
+# OpenSWATH
+# -----------------------------------------------------------------------------
+def openswath_to_msstats(
+    input: pd.DataFrame,
+    annotation: Optional[pd.DataFrame] = None,
+    *,
+    filter_with_mscore: bool = True,
+    mscore_cutoff: float = 0.01,
+    use_unique_peptide: bool = True,
+    remove_few_measurements: bool = True,
+    remove_protein_with_1_feature: bool = False,
+    summary_for_multiple_rows: str = "max",
+) -> pd.DataFrame:
+    """OpenSWATH export → MSstats long-format.
+
+    Port of ``OpenSWATHtoMSstatsFormat``. The OpenSWATH cleaner
+    (``MSstatsConvert:::.cleanRawOpenSWATH``):
+
+    * selects ``ProteinName, FullPeptideName, Charge, filename,
+      aggr_Fragment_Annotation, aggr_Peak_Area, m_score, decoy``;
+    * renames to ``ProteinName, PeptideSequence, PrecursorCharge, Run,
+      FragmentIon, Intensity``;
+    * explodes the semicolon-separated ``FragmentIon`` / ``Intensity``
+      lists into per-fragment rows;
+    * replaces ``:`` with ``_`` in peptide / fragment names;
+    * sets ``Intensity < 1`` to NA;
+    * drops decoys (``decoy == 1``) and (optionally) rows with
+      ``m_score >= mscore_cutoff``.
+    """
+    df = input.copy()
+    rename_map = {
+        "FullPeptideName": "PeptideSequence",
+        "Charge": "PrecursorCharge",
+        "filename": "Run",
+        "aggr_Fragment_Annotation": "FragmentIon",
+        "aggr_Peak_Area": "Intensity",
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    # decoy filter
+    if "decoy" in df.columns:
+        df = df.loc[pd.to_numeric(df["decoy"], errors="coerce").fillna(0) != 1]
+    # m_score filter
+    if filter_with_mscore and "m_score" in df.columns:
+        ms = pd.to_numeric(df["m_score"], errors="coerce")
+        df = df.loc[ms < mscore_cutoff]
+    # explode semicolon-separated fragment/intensity lists
+    for col in ("FragmentIon", "Intensity"):
+        if col in df.columns:
+            df[col] = df[col].astype(str)
+    if ("FragmentIon" in df.columns
+            and df["FragmentIon"].str.contains(";").any()):
+        df = df.assign(
+            FragmentIon=df["FragmentIon"].str.split(";"),
+            Intensity=df["Intensity"].str.split(";"),
+        )
+        df = df.explode(["FragmentIon", "Intensity"])
+    # ":" → "_" in peptide / fragment names
+    for col in ("PeptideSequence", "FragmentIon"):
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.replace(":", "_", regex=False)
+    df["ProductCharge"] = "NA"
+    df["IsotopeLabelType"] = "L"
+    df["Intensity"] = pd.to_numeric(df["Intensity"], errors="coerce")
+    df.loc[df["Intensity"] < 1, "Intensity"] = np.nan
+    keep = [c for c in (
+        "ProteinName", "PeptideSequence", "PrecursorCharge",
+        "FragmentIon", "ProductCharge", "IsotopeLabelType",
+        "Condition", "BioReplicate", "Run", "Intensity",
+    ) if c in df.columns]
+    df = df[keep].copy()
+    if use_unique_peptide:
+        df = _drop_shared_peptides(df)
+    df = _aggregate_psms(df, summary_fn=summary_for_multiple_rows)
+    if remove_few_measurements:
+        df = _drop_few_measurements(df, min_obs=2)
+    if remove_protein_with_1_feature:
+        df = _drop_single_feature_proteins(df)
+    return _finalize_msstats_long(df, annotation=annotation)
+
+
+# -----------------------------------------------------------------------------
+# DIA-Umpire
+# -----------------------------------------------------------------------------
+def diaumpire_to_msstats(
+    raw_frag: pd.DataFrame,
+    raw_pep: Optional[pd.DataFrame] = None,
+    raw_pro: Optional[pd.DataFrame] = None,
+    annotation: Optional[pd.DataFrame] = None,
+    *,
+    use_selected_frag: bool = True,
+    use_selected_pep: bool = True,
+    remove_few_measurements: bool = True,
+    remove_protein_with_1_feature: bool = False,
+    summary_for_multiple_rows: str = "max",
+) -> pd.DataFrame:
+    """DIA-Umpire export → MSstats long-format.
+
+    Port of ``DIAUmpiretoMSstatsFormat``. DIA-Umpire writes three
+    tables (fragment / peptide / protein); the converter joins them and
+    keeps only "selected" fragments/peptides. This Python port accepts
+    the fragment-level table already joined to protein / peptide
+    identity (long format) with columns ``ProteinName``,
+    ``PeptideSequence``, ``FragmentIon``, ``Run``, ``Intensity`` plus
+    optional ``Selected_fragment`` / ``Selected_peptide`` flags.
+
+    DIA-Umpire always removes shared peptides in R
+    (``remove_shared_peptides = TRUE``).
+    """
+    df = raw_frag.copy()
+    if use_selected_frag:
+        for cand in ("Selected_fragment", "Selected.fragment",
+                     "UseInQuant_frag"):
+            if cand in df.columns:
+                keep = df[cand].astype(str).str.lower().isin(
+                    {"true", "1", "yes"})
+                df = df.loc[keep]
+                break
+    if use_selected_pep:
+        for cand in ("Selected_peptide", "Selected.peptide",
+                     "UseInQuant_pep"):
+            if cand in df.columns:
+                keep = df[cand].astype(str).str.lower().isin(
+                    {"true", "1", "yes"})
+                df = df.loc[keep]
+                break
+    if "PrecursorCharge" not in df.columns:
+        df["PrecursorCharge"] = "NA"
+    df["ProductCharge"] = "NA"
+    df["IsotopeLabelType"] = "L"
+    if "Intensity" in df.columns:
+        df["Intensity"] = pd.to_numeric(df["Intensity"], errors="coerce")
+        df.loc[df["Intensity"] == 0, "Intensity"] = np.nan
+    keep = [c for c in (
+        "ProteinName", "PeptideSequence", "PrecursorCharge",
+        "FragmentIon", "ProductCharge", "IsotopeLabelType",
+        "Condition", "BioReplicate", "Run", "Intensity",
+    ) if c in df.columns]
+    df = df[keep].copy()
+    # DIA-Umpire always removes shared peptides
+    df = _drop_shared_peptides(df)
+    df = _aggregate_psms(df, summary_fn=summary_for_multiple_rows)
+    if remove_few_measurements:
+        df = _drop_few_measurements(df, min_obs=2)
+    if remove_protein_with_1_feature:
+        df = _drop_single_feature_proteins(df)
+    return _finalize_msstats_long(df, annotation=annotation)
+
+
+# -----------------------------------------------------------------------------
 # MaxQuant — re-exported (definition in pipeline.py for backwards-compat)
 # -----------------------------------------------------------------------------
 from .pipeline import maxquant_to_msstats   # noqa: E402,F401  (re-export)
@@ -725,4 +1063,8 @@ __all__ = [
     "openms_to_msstats",
     "skyline_to_msstats",
     "maxquant_to_msstats",
+    "pd_to_msstats",
+    "progenesis_to_msstats",
+    "openswath_to_msstats",
+    "diaumpire_to_msstats",
 ]
