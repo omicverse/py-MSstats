@@ -1,16 +1,17 @@
 name: Publish to PyPI
 
-# Builds the sdist + wheel on a GitHub-hosted runner and uploads to
-# PyPI with twine. Running the upload from a GitHub runner avoids
-# local-network rate limits.
+# Builds the sdist + wheel on a GitHub-hosted runner and publishes to
+# PyPI via OIDC Trusted Publishing (no API token needed — the project's
+# trusted publisher is configured on pypi.org for omicverse/py-MSstats
+# + this workflow file).
 #
 # Triggers:
 #   * workflow_dispatch — manual one-click release.
-#   * schedule — every 6 h. This auto-retries the upload: PyPI applies a
-#     day-scale rate limit on *new project* creation, so the very first
-#     publish of this package may 429 for a while. ``--skip-existing``
-#     makes every run after the first publish a harmless no-op, so the
-#     schedule can be safely deleted once the project is live on PyPI.
+#   * schedule — every 6 h. Auto-retries: PyPI applies a day-scale rate
+#     limit on new-project creation, so the first publish may 429 for a
+#     while. ``skip-existing: true`` makes every post-publish run a
+#     harmless no-op, so the schedule can be deleted once the project is
+#     live on PyPI.
 on:
   workflow_dispatch:
   schedule:
@@ -19,6 +20,8 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write          # required for PyPI Trusted Publishing (OIDC)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,12 +29,9 @@ jobs:
           python-version: '3.11'
       - name: Build sdist + wheel
         run: |
-          python -m pip install --upgrade pip build twine
+          python -m pip install --upgrade pip build
           python -m build
-      - name: Check distributions
-        run: python -m twine check dist/*
-      - name: Upload to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: python -m twine upload --skip-existing dist/*
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
