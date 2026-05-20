@@ -1,0 +1,27 @@
+name: Publish to PyPI
+
+# Manually triggered release workflow. Builds the sdist + wheel on a
+# GitHub-hosted runner and uploads to PyPI with twine. Running the
+# upload from a GitHub runner avoids local-network rate limits.
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+      - name: Check distributions
+        run: python -m twine check dist/*
+      - name: Upload to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: python -m twine upload --skip-existing dist/*
