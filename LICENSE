@@ -1,0 +1,9 @@
+Artistic License 2.0
+
+This Python port is released under the same Artistic-2.0 license as the
+original Bioconductor MSstats package
+(https://bioconductor.org/packages/release/bioc/html/MSstats.html,
+by Meena Choi, Tsung-Heng Tsai, Devon Kohler, and contributors). The
+full Artistic-2.0 text is available at
+https://www.gnu.org/licenses/license-list.html#ArtisticLicense2 and
+applies to all files in this repository.
